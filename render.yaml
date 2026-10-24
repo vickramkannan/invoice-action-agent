@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: invoice-action-agent
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: AGENT_BEARER_TOKEN
+        sync: false
+      - key: AI_API_KEY
+        sync: false
+      - key: AI_MODEL
+        value: gpt-4.1-nano
+      - key: AI_BASE_URL
+        value: https://api.openai.com/v1
+      - key: A2A_BASE_URL
+        sync: false
+      - key: DATABASE_PATH
+        value: /var/data/invoice_agent.db
