@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse, Response
 APP_VERSION = "1.0.0"
 BASE_URL = os.getenv("A2A_BASE_URL", "").rstrip("/")
 AGENT_TOKEN = os.getenv("AGENT_BEARER_TOKEN", "")
-DB_PATH = os.getenv("DATABASE_PATH", "invoice_agent.db")
+DB_PATH = os.getenv("DATABASE_PATH", "/tmp/invoice_agent.db")
 AI_BASE_URL = os.getenv("AI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 AI_API_KEY = os.getenv("AI_API_KEY", "")
 AI_MODEL = os.getenv("AI_MODEL", "gpt-4.1-nano")
@@ -27,11 +27,38 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 def connect():
-    db = sqlite3.connect(DB_PATH, timeout=20, isolation_level=None)
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA journal_mode=WAL")
-    db.execute("PRAGMA foreign_keys=ON")
-    return db
+    """Open SQLite, creating the parent directory when possible.
+
+    If the configured path is unavailable (for example, a Render disk path
+    without a mounted persistent disk), fall back to /tmp so the service can
+    start. /tmp is ephemeral; configure DATABASE_PATH to a mounted persistent
+    disk for durable task state.
+    """
+    global DB_PATH
+    candidates = [DB_PATH]
+    fallback = "/tmp/invoice_agent.db"
+    if os.path.abspath(DB_PATH) != os.path.abspath(fallback):
+        candidates.append(fallback)
+
+    last_error = None
+    for path in candidates:
+        try:
+            parent = os.path.dirname(os.path.abspath(path))
+            os.makedirs(parent, exist_ok=True)
+            db = sqlite3.connect(path, timeout=20, isolation_level=None)
+            db.row_factory = sqlite3.Row
+            db.execute("PRAGMA journal_mode=WAL")
+            db.execute("PRAGMA foreign_keys=ON")
+            if path != DB_PATH:
+                print(
+                    f"WARNING: DATABASE_PATH {DB_PATH!r} is unavailable; "
+                    f"using temporary database {path!r}. Data may be lost on restart."
+                )
+                DB_PATH = path
+            return db
+        except sqlite3.OperationalError as exc:
+            last_error = exc
+    raise last_error or sqlite3.OperationalError("Unable to open SQLite database")
 
 def init_db():
     with connect() as db:
